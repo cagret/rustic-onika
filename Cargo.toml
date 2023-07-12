@@ -1,0 +1,15 @@
+[package]
+name = "rustic-onika"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+getopts = "0.2.21"
+regex = "1.5.4"
+structopt = "0.3"
+rayon = "1.7.0"
+zstd = "0.8.1"
+zstr = "0.1.1"
+arrayvec = "0.5"
