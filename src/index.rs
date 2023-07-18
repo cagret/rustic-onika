@@ -52,7 +52,8 @@ impl Index {
         for _ in 0..MUTEX_NUMBER {
             lock.push(Mutex::new(0));
         }
-
+        let buckets = vec![Vec::<Gid>::new(); fingerprint_range as usize];
+        let buckets_pos = vec![Vec::<u16>::new(); fingerprint_range as usize];
         Index {
             k,
             f,
@@ -68,8 +69,10 @@ impl Index {
             offset_update_kmer,
             min_score,
             filename,
-            buckets: Vec::new(),
-            buckets_pos: Vec::new(),
+            //buckets: Vec::new(),
+            //buckets_pos: Vec::new(),
+            buckets: vec![Vec::new(); fingerprint_range as usize], // initialize here
+            buckets_pos: vec![Vec::new(); fingerprint_range as usize], // initialize here
             lock,
             filenames: Arc::new(Mutex::new(Vec::new())),
             file_sketches: Arc::new(Mutex::new(HashMap::new())),
@@ -119,12 +122,28 @@ impl Index {
         0
     }
 
+    pub fn get_data_type(&self, filename: &str) -> char {
+        if filename.find(".fq").is_some() {
+            return 'Q';
+        }
+        if filename.find(".fastq").is_some() {
+            return 'Q';
+        }
+        'A'
+    }
+
     pub fn get_filename(&mut self, filestr: &str) {
+        if cfg!(debug_assertions) {
+            dbg!(filestr);
+        }
         let file = File::open(filestr).expect("Unable to open the file");
         let reader = BufReader::new(file);
 
         for line in reader.lines() {
             if let Ok(filename) = line {
+                if cfg!(debug_assertions) {
+                    dbg!(&filename);
+                }
                 if filename.len() > 2 && self.exists_test(&filename) {
 
                     let id = {
@@ -147,41 +166,46 @@ impl Index {
     }
 
 
-
     pub fn insert_sketch(&mut self, sketch: &[u64], genome_id: u32) {
         let mutex_number = self.lock.len() as u64;
-
         sketch.iter().enumerate().for_each(|(i, &val)| {
-            if val < self.fingerprint_range {
+            if cfg!(debug_assertions) {
+                dbg!(val);
+            }
+            // Check if val is within the size of buckets and buckets_pos
+            if val < self.fingerprint_range && (val as usize) < self.buckets.len() && (val as usize) < self.buckets_pos.len() {
                 let lock_index = (val + (i as u64) * self.fingerprint_range) % mutex_number;
-                let lock = &self.lock[lock_index as usize];
-
-                let guard = lock.lock().unwrap();
-                self.buckets[val as usize].push(genome_id);
-                self.buckets_pos[val as usize].push(i as u16);
-                drop(guard);
+                // Check if lock_index is within the size of self.lock
+                if (lock_index as usize) < self.lock.len() {
+                    let lock = &self.lock[lock_index as usize];
+                    if cfg!(debug_assertions) {
+                        dbg!(lock_index);
+                    }
+                    let guard = lock.lock().unwrap();
+                    if cfg!(debug_assertions) {
+                        dbg!(&self.buckets.len(), &val);
+                    }
+                    self.buckets[val as usize].push(genome_id);
+                    self.buckets_pos[val as usize].push(i as u16);
+                    drop(guard);
+                }
             }
         });
     }
 
 
-    pub fn get_data_type(&self, filename: &str) -> char {
-        if filename.find(".fq").is_some() {
-            return 'Q';
-        }
-        if filename.find(".fastq").is_some() {
-            return 'Q';
-        }
-        'A'
-    }
 
     pub fn insert_file(&mut self, filestr: &str, identifier: u32) {
+        if cfg!(debug_assertions) {
+            dbg!(filestr, identifier);
+        }
         //let r#type = self.get_data_type(filestr); // Utilise self pour appeler la méthode de la structure
         let file = File::open(filestr).expect("Unable to open the file");
         let reader = BufReader::new(file);
 
         for line in reader.lines() {
             if let Ok(ref_value) = line {
+                dbg!(&ref_value);
                 let mut ref_value = ref_value.to_string();
                 //let mut kmer_sketch = Vec::new();
                 let mut sketch = vec![u64::MAX; self.f as usize];
@@ -193,6 +217,7 @@ impl Index {
                 {
                     let file_sketches = Arc::clone(&self.file_sketches);
                     let mut file_sketches = file_sketches.lock().unwrap();
+                    dbg!(&ref_value, &sketch);
                     file_sketches.insert(ref_value.clone(), sketch.clone());
                 }
 
@@ -368,46 +393,46 @@ impl Index {
     }
 
 
-pub fn sketch_densification(&self, sketch: &mut Vec<u64>, empty_cell: u32) {
-    let size = sketch.len();
-    let empty_cell = Arc::new(Mutex::new(empty_cell));
-    let mi = u64::MAX;
+    pub fn sketch_densification(&self, sketch: &mut Vec<u64>, empty_cell: u32) {
+        let size = sketch.len();
+        let empty_cell = Arc::new(Mutex::new(empty_cell));
+        let mi = u64::MAX;
 
-    while *empty_cell.lock().unwrap() != 0 {
-        for i in 0..size {
-            if sketch[i] != mi {
-                let hash = self.hash_family(sketch[i], mi.into()) % self.f as u64;
-                let mut empty_cell_guard = empty_cell.lock().unwrap();
-                if *empty_cell_guard > 0 && sketch[hash as usize] == mi {
-                    let temp = std::mem::replace(&mut sketch[i], 0);
+        while *empty_cell.lock().unwrap() != 0 {
+            for i in 0..size {
+                if sketch[i] != mi {
+                    let hash = self.hash_family(sketch[i], mi.into()) % self.f as u64;
+                    let mut empty_cell_guard = empty_cell.lock().unwrap();
+                    if *empty_cell_guard > 0 && sketch[hash as usize] == mi {
+                        let temp = std::mem::replace(&mut sketch[i], 0);
                         let _ = std::mem::replace(&mut sketch[hash as usize], temp);
-                    sketch[hash as usize] = temp;
-                    *empty_cell_guard -= 1;
-                }
-            }
-        }
-    }
-}
-
-pub fn query_sketch(&self, sketch: &[u64]) -> Vec<u32> {
-    let genome_numbers = self.genome_numbers.lock().unwrap();
-    let mut result = vec![0; *genome_numbers as usize];
-
-    for (i, val) in sketch.iter().enumerate() {
-        if *val < self.fingerprint_range {
-            let bucket = &self.buckets[*val as usize];
-            let bucket_pos = &self.buckets_pos[*val as usize];
-
-            for j in 0..bucket.len() {
-                if bucket_pos[j] == i as u16 {
-                    result[bucket[j] as usize] += 1;
+                        sketch[hash as usize] = temp;
+                        *empty_cell_guard -= 1;
+                    }
                 }
             }
         }
     }
 
-    result
-}
+    pub fn query_sketch(&self, sketch: &[u64]) -> Vec<u32> {
+        let genome_numbers = self.genome_numbers.lock().unwrap();
+        let mut result = vec![0; *genome_numbers as usize];
+
+        for (i, val) in sketch.iter().enumerate() {
+            if *val < self.fingerprint_range {
+                let bucket = &self.buckets[*val as usize];
+                let bucket_pos = &self.buckets_pos[*val as usize];
+
+                for j in 0..bucket.len() {
+                    if bucket_pos[j] == i as u16 {
+                        result[bucket[j] as usize] += 1;
+                    }
+                }
+            }
+        }
+
+        result
+    }
 
 
 
@@ -416,7 +441,6 @@ pub fn query_sketch(&self, sketch: &[u64]) -> Vec<u32> {
             sketch1[i] = sketch1[i].min(sketch2[i]);
         }
     }
-
     pub fn print_matrix(&self) {
         println!("PRINT MATRIX: ");
         let size = self.genome_numbers.lock().unwrap().clone() as usize;
@@ -425,66 +449,76 @@ pub fn query_sketch(&self, sketch: &[u64]) -> Vec<u32> {
         for i in 0..size {
             println!("i:'{}' new", i);
             let filenames_lock = self.filenames.lock().unwrap();
-            let filename_i = &filenames_lock[i];
-            let file_sketches = self.file_sketches.lock().unwrap();
-            let sketch_i = match file_sketches.get(filename_i) {
-                Some(sketch) => sketch,
-                None => {
-                    eprintln!("Could not find sketch for filename '{}'", filename_i);
-                    continue;
-                }
-            };
+            if i < filenames_lock.len() {
+                let filename_i = &filenames_lock[i];
+                let file_sketches = self.file_sketches.lock().unwrap();
+                let sketch_i = match file_sketches.get(filename_i) {
+                    Some(sketch) => sketch,
+                    None => {
+                        eprintln!("Could not find sketch for filename '{}'", filename_i);
+                        continue;
+                    }
+                };
 
-            for j in i..size {
-                println!("j:'{}' new", j);
+                for j in i..size {
+                    println!("j:'{}' new", j);
+                    if j < filenames_lock.len() {
+                        if i == j {
+                            matrix[i][j] = 0.0;
+                        } else {
+                            let filename_j = &filenames_lock[j];
+                            let sketches = self.file_sketches.lock().unwrap();
+                            let sketch_j = match sketches.get(filename_j) {
+                                Some(sketch) => sketch,
+                                None => {
+                                    eprintln!("Could not find sketch for filename '{}'", filename_j);
+                                    continue;
+                                }
+                            };
 
-                if i == j {
-                    matrix[i][j] = 0.0;
-                } else {
-                    let filename_j = &filenames_lock[j];
-                    let sketches = self.file_sketches.lock().unwrap();
-                    let sketch_j = match sketches.get(filename_j) {
-                        Some(sketch) => sketch,
-                        None => panic!("Key not found"),
-                    };
+                            let intersection: Vec<&u64> = sketch_i
+                                .iter()
+                                .filter(|sketch| sketch_j.contains(sketch))
+                                .collect();
 
-                    let intersection: Vec<&u64> = sketch_i
-                        .iter()
-                        .filter(|sketch| sketch_j.contains(sketch))
-                        .collect();
+                            let mut union_set: HashSet<u64> = HashSet::new();
+                            union_set.extend(sketch_i);
+                            union_set.extend(sketch_j);
 
-                    let mut union_set: HashSet<u64> = HashSet::new();
-                    union_set.extend(sketch_i);
-                    union_set.extend(sketch_j);
+                            let jaccard_distance =
+                                1.0 - (intersection.len() as f64) / (union_set.len() as f64);
 
-                    let jaccard_distance =
-                        1.0 - (intersection.len() as f64) / (union_set.len() as f64);
-
-                    matrix[i][j] = jaccard_distance;
-                    matrix[j][i] = jaccard_distance;
+                            matrix[i][j] = jaccard_distance;
+                            matrix[j][i] = jaccard_distance;
+                        }
+                    }
                 }
             }
         }
 
         print!("##Names ");
         let filenames_guard = self.filenames.lock().unwrap();
-        for filename in &*filenames_guard {            print!("{}\t", filename);
+        for filename in &*filenames_guard {
+            print!("{}\t", filename);
         }
         println!();
 
         for i in 0..size {
             let filenames_guard = self.filenames.lock().unwrap();
-            print!("{}\t", filenames_guard[i]);
-            for j in 0..size {
-                if i == j {
-                    print!("-\t");
-                } else {
-                    print!("{:.3}\t", matrix[i][j]);
+            if i < filenames_guard.len() {
+                print!("{}\t", filenames_guard[i]);
+                for j in 0..size {
+                    if j < filenames_guard.len() {
+                        if i == j {
+                            print!("-\t");
+                        } else {
+                            print!("{:.3}\t", matrix[i][j]);
+                        }
+                    }
                 }
+                println!();
             }
-            println!();
         }
+
     }
 }
-
-
