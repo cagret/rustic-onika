@@ -14,16 +14,13 @@ Rust Onika is a program designed to perform indexing operations on files. It pro
 
 1. Make sure you have Rust installed on your system. If not, you can install it from the official Rust website: [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
 
-2. Clone the Rust Onika repository:
+2. Clone the Rust Onika repository: `git clone git@github.com:cagret/rustic-onika.git`
 
+3. Change to the project directory: `cd rustic-onika`
 
-3. Change to the project directory:
+4. Build the project using Cargo: `cargo build --release`
 
-
-4. Build the project using Cargo:
-
-
-5. Run Rust Onika:
+5. Run Rust Onika: `target/release/rustic-onika [OPTIONS]`
 
 
 ## Usage
@@ -40,19 +37,16 @@ Rust Onika accepts the following command-line options:
 
 1. Index files in the current directory:
 
-
 2. Index files in a specific directory:
 
-
 3. Search for a word in the indexed files:
-
 
 4. Search for a phrase in the indexed files:
 
 
 ## Contributing
 
-Contributions to Rust Onika are welcome! If you encounter any issues or have suggestions for improvements, please open an issue on the GitHub repository: [https://github.com/your-username/rust-onika/issues](https://github.com/your-username/rust-onika/issues)
+Contributions to Rust Onika are welcome! If you encounter any issues or have suggestions for improvements, please open an issue on the GitHub repository: [git@github.com:cagret/rustic-onika.git/issues](https://github.com/cagret/rust-onika/issues)
 
 To contribute code, follow these steps:
 
@@ -62,10 +56,7 @@ To contribute code, follow these steps:
 
 3. Make your changes and commit them:
 
-
-
 4. Push the changes to your forked repository:
-
 
 5. Open a pull request on the main repository.
 
